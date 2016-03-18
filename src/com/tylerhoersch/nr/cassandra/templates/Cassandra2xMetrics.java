@@ -115,11 +115,13 @@ public class Cassandra2xMetrics implements JMXTemplate<List<Metric>> {
     private List<Metric> getStorageMetrics(MBeanServerConnection connection, JMXRunner jmxRunner) throws Exception {
         List<Metric> metrics = new ArrayList<>();
 
-        Double load = jmxRunner.getAttribute(connection, "org.apache.cassandra.db", null, "StorageService", null, "Load");
+        String loadString = jmxRunner.getAttribute(connection, "org.apache.cassandra.db", null, "StorageService", null, "LoadString");
+        String[] parts = loadString.split(" ");
+        Double load = toBytes(Double.parseDouble(parts[0]), parts[1]);
         metrics.add(new Metric(String.format(STORAGE_LOAD_INSTANCE, instance), BYTES, load));
         metrics.add(new Metric(STORAGE_LOAD_GLOBAL, BYTES, load));
 
-        Long commitLogSize = jmxRunner.getAttribute(connection, "org.apache.cassandra.db", null, "Commitlog", null, "TotalCommitlogSize");
+        Long commitLogSize = jmxRunner.getAttribute(connection, "org.apache.cassandra.db", null, "Commitlog", null, "ActiveOnDiskSize");
         metrics.add(new Metric(String.format(COMMIT_LOG_INSTANCE, instance), BYTES, commitLogSize));
         metrics.add(new Metric(COMMIT_LOG_GLOBAL, BYTES, commitLogSize));
 
@@ -140,13 +142,15 @@ public class Cassandra2xMetrics implements JMXTemplate<List<Metric>> {
     private List<Metric> getLatencyMetrics(MBeanServerConnection connection, JMXRunner jmxRunner) throws Exception {
         List<Metric> metrics = new ArrayList<>();
 
-        Double readMean = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Read", "Mean");
-        TimeUnit readMeanUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Read", "LatencyUnit");
+        Double readMean = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Read", "MeanRate");
+        String sreadMeanUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Read", "DurationUnit");
+        TimeUnit readMeanUnits = TimeUnit.valueOf(sreadMeanUnits.toUpperCase());
         metrics.add(new Metric(String.format(READ_LATENCY_INSTANCE, instance), MILLIS, toMillis(readMean, readMeanUnits)));
         metrics.add(new Metric(READ_LATENCY_GLOBAL, MILLIS, toMillis(readMean, readMeanUnits)));
 
-        Double writeMean = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Write", "Mean");
-        TimeUnit writeMeanUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Write", "LatencyUnit");
+        Double writeMean = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Write", "MeanRate");
+        String swriteMeanUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Latency", "ClientRequest", "Write", "DurationUnit");
+        TimeUnit writeMeanUnits = TimeUnit.valueOf(sreadMeanUnits.toUpperCase());
         metrics.add(new Metric(String.format(WRITE_LATENCY_INSTANCE, instance), MILLIS, toMillis(writeMean, writeMeanUnits)));
         metrics.add(new Metric(WRITE_LATENCY_GLOBAL, MILLIS, toMillis(writeMean, writeMeanUnits)));
 
@@ -163,12 +167,17 @@ public class Cassandra2xMetrics implements JMXTemplate<List<Metric>> {
         metrics.add(new Metric(String.format(WRITE_LATENCY_TOTAL_INSTANCE, instance), MILLIS, totalWriteLatency * 0.001));
 
         Double readUnavailableRequests = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Unavailables", "ClientRequest", "Read", "MeanRate");
-        TimeUnit readUnavailableRequestsUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Unavailables", "ClientRequest", "Read", "RateUnit");
+        TimeUnit readUnavailableRequestsUnits = TimeUnit.valueOf("SECONDS");
         metrics.add(new Metric(String.format(READ_UNAVAILABLE_REQUESTS_INSTANCE, instance), MILLIS, toMillis(readUnavailableRequests, readUnavailableRequestsUnits)));
 
         Double writeUnavailableRequests = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Unavailables", "ClientRequest", "Write", "MeanRate");
-        TimeUnit writeUnavailableRequestsUnits = jmxRunner.getAttribute(connection, "org.apache.cassandra.metrics", "Unavailables", "ClientRequest", "Write", "RateUnit");
+        TimeUnit writeUnavailableRequestsUnits = TimeUnit.valueOf("SECONDS");
         metrics.add(new Metric(String.format(WRITE_UNAVAILABLE_REQUESTS_INSTANCE, instance), MILLIS, toMillis(writeUnavailableRequests, writeUnavailableRequestsUnits)));
+
+
+        // for(Metric metric : metrics) {
+        //     logger.error(String.format( metric.getName(), "(",metric.getValueType(),") = ", metric.getValue() ));
+        // }
 
         return metrics;
     }
@@ -196,6 +205,21 @@ public class Cassandra2xMetrics implements JMXTemplate<List<Metric>> {
                 return sourceValue * 1000;
             default:
                 return sourceValue;
+        }
+    }
+
+    private Double toBytes(Double sourceValue, String sourceUnit) {
+
+        if(sourceUnit == null || sourceValue == null){
+            return null;
+        }
+
+        Double mult;
+        switch (sourceUnit) {
+         case "MB": return (Math.pow(1000, 2) * sourceValue);
+         case "GB": return (Math.pow(1000, 3) * sourceValue);
+         case "TB": return (Math.pow(1000, 4) * sourceValue);
+         default:   return sourceValue;
         }
     }
 }
